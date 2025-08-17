@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { inngest } from "./client";
-import { openai, createAgent, createTool, createNetwork } from "@inngest/agent-kit";
+import { openai, createAgent, createTool, createNetwork, type Tool } from "@inngest/agent-kit";
 import { Sandbox } from "@e2b/code-interpreter";
 import {
   getSandbox,
@@ -10,10 +10,16 @@ import {
   LastAssistantTextMessageContent,
 } from "./utils";
 import { PROMPT } from "@/prompt";
+import prisma from "@/lib/db";
 
-export const helloWorld = inngest.createFunction(
-  { id: "hello-world" },
-  { event: "test/hello.world" },
+interface AgentState{
+  summary: string;
+  files:{[path:string]:string}
+};
+
+export const codeAgentFunction = inngest.createFunction(
+  { id: "code-agent" },
+  { event: "code-agent/run" },
   async ({ event, step }) => {
     // 1) create sandbox once
     const sandboxId = await step.run("get-sandbox-id", async () => {
@@ -26,7 +32,7 @@ export const helloWorld = inngest.createFunction(
     const appDir = await step.run("detect-app-dir", async () => detectAppDir(sandboxId, rootDir));
 
     // 3) agent
-    const codeAgent = createAgent({
+    const codeAgent = createAgent<AgentState>({
       name: "codeAgent",
       description: "An expert coding agent",
       system: PROMPT,
@@ -72,7 +78,9 @@ export const helloWorld = inngest.createFunction(
               })
             ),
           }),
-          handler: async ({ files }, { step, network }) => {
+          handler: async ({ files }, { step, network }:Tool.Options<AgentState>
+
+          ) => {
             const newFiles = await step?.run("createOrUpdateFiles", async () => {
               try {
                 const sb = await getSandbox(sandboxId);
@@ -142,14 +150,17 @@ export const helloWorld = inngest.createFunction(
     });
 
     // 4) network
-    const network = createNetwork({
+    const network = createNetwork<AgentState>({
       name: "coding-agent-network",
       agents: [codeAgent],
       maxIter: 15,
       router: async ({ network }) => (network.state.data.summary ? undefined : codeAgent),
     });
 
-    await network.run(event.data.value);
+    const result= await network.run(event.data.value);
+    // const isError = 
+    // !result.state.data.summary||Object.keys(result.state.data.files).length===0;
+
 
     // 5) ensure dev server running FROM THE RIGHT ROOT
     const ensureInfo = await step.run("ensure-dev-server", async () =>
@@ -162,6 +173,36 @@ export const helloWorld = inngest.createFunction(
       const host = sandbox.getHost(3000);
       return `https://${host}`;
     });
+
+   
+
+
+    await step.run("save-result", async () => {
+
+      try {
+        
+        return await prisma.message.create({
+          data: {
+            content: result.state.data.summary || "", // summary text
+            role: "ASSISTANT",
+            type: "RESULT",
+            fragment: {
+              create: {
+                sandboxUrl,
+                title: "Fragment",
+                files: result.state.data.files || {}, // JSON field
+              },
+            },
+          },
+          include: { fragment: true }, // optional: return nested fragment too
+        });
+      } catch (err) {
+        console.error("DB Save Error:", err);
+        throw err;
+      }
+    });
+    
+ 
 
     // 7) final
     return {
