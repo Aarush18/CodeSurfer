@@ -1,0 +1,23 @@
+
+
+interface Props {
+    children:React.ReactNode;
+};
+
+const Layout = ({children}:Props)=>{
+    return(
+        <main className="flex flex-col min-h-screen max-h-screen">
+            <div className="absolute inset-0 -z-10 h-full w-full bg-white bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] dark:bg-black dark:bg-[radial-gradient(#27272a_1px,transparent_1px)]"/>
+            <div className="flex-1 flex flex-col px-4 pb-4">
+
+                {children}
+
+            </div>
+
+
+
+        </main>
+    )
+}
+
+export default Layout ;
