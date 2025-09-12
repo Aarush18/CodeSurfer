@@ -19,12 +19,16 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { FileExplorer } from "@/components/file-explorer";
 import { UserControl } from "@/components/user-control";
+import { useAuth } from "@clerk/nextjs";
 
 interface Props {
   projectId: string;
 }
 
 export const ProjectView = ({ projectId }: Props) => {
+  const{has}=useAuth();
+  const hasProAccess = has?.({plan:"pro"});
+
   const trpc = useTRPC();
 
   const [activeFragment, setActiveFragment] = useState<Fragment | null>(null);
@@ -77,11 +81,12 @@ export const ProjectView = ({ projectId }: Props) => {
               </TabsList>
 
               <div className="flex items-center gap-x-2">
+                {!hasProAccess && (
                 <Button asChild size="sm" variant="default">
                   <Link href="/pricing" className="flex items-center gap-x-1">
                     <CrownIcon /> Upgrade
                   </Link>
-                </Button>
+                </Button>)}
                 <UserControl/>
               </div>
             </div>
