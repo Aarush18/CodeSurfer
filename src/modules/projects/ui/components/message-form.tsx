@@ -5,11 +5,13 @@ import {useState} from "react";
 import {toast} from "sonner"
 import TextareaAutosize from "react-textarea-autosize"
 import {ArrowUpIcon,Loader2Icon} from "lucide-react"
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { useTRPC } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Form, FormField } from "@/components/ui/form";
+import { Usage } from "./usage";
+import { useRouter } from "next/navigation";
 
 
 interface Props {
@@ -22,9 +24,11 @@ const formSchema = z.object({
 })
 
 export const MessageForm =({projectId}:Props) => {
-   
+    const router = useRouter();
     const trpc = useTRPC();
     const queryClient = useQueryClient();
+
+    const {data:usage} = useQuery(trpc.usage.status.queryOptions());
 
     const form = useForm<z.infer<typeof formSchema>>({
         resolver:zodResolver(formSchema),
@@ -39,12 +43,20 @@ export const MessageForm =({projectId}:Props) => {
             queryClient.invalidateQueries(
                 trpc.messages.getMany.queryOptions({
                     projectId
-                })
+                }))
+                queryClient.invalidateQueries(
+                    trpc.usage.status.queryOptions()
+                );
                 
-            )
+            
         },
         onError:(error)=>{
             toast.error(error.message);
+
+            if(error.data?.code==="TOO_MANY_REQUESTS")
+            {
+                router.push("/pricing");
+            }
         }
     }))
 
@@ -54,15 +66,24 @@ export const MessageForm =({projectId}:Props) => {
             projectId
         })
     };
+    const showUsage = !!usage;
     const isPending = createMessage.isPending;
     const isBtnDisable = isPending || !form.formState.isValid;
     const [isFocused,setIsFocused] = useState(false);
-    const [showUsage,setShowUsage] = useState(false);
-
+   
 
 
     return(
         <Form{...form}>
+        {showUsage && (
+            <Usage
+            points={usage.remainingPoints}
+            msBeforeNext={usage.msBeforeNext}
+            // points={0}
+            // msBeforeNext={0}
+            
+            />
+        )}
         <form onSubmit={form.handleSubmit(onSubmit)}
         className={cn(
             "relative border p-4 pt-1 rounded-xl bg-sidebar dark:bg-sidebar transition-all",
