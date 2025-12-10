@@ -35,7 +35,7 @@ export async function consumeCredits(){
 };
 
 export async function getUsageStatus(){
-    const {userId} =await auth();
+    const {userId} = await auth();
 
     if(!userId){
         throw new Error("user not authenticated");
