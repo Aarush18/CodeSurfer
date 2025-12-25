@@ -1,6 +1,12 @@
-import { z } from "zod";
+import { any, z } from "zod";
 import { inngest } from "./client";
-import { openai, createAgent, createTool, createNetwork, type Tool } from "@inngest/agent-kit";
+import {
+  openai,
+  createAgent,
+  createTool,
+  createNetwork,
+  type Tool,
+} from "@inngest/agent-kit";
 import { Sandbox } from "@e2b/code-interpreter";
 import {
   getSandbox,
@@ -12,10 +18,10 @@ import {
 import { PROMPT } from "@/prompt";
 import prisma from "@/lib/db";
 
-interface AgentState{
+interface AgentState {
   summary: string;
-  files:{[path:string]:string}
-};
+  files: { [path: string]: string };
+}
 
 export const codeAgentFunction = inngest.createFunction(
   { id: "code-agent" },
@@ -28,8 +34,12 @@ export const codeAgentFunction = inngest.createFunction(
     });
 
     // 2) detect root + app dir (used by tools & ensure step)
-    const rootDir = await step.run("detect-root", async () => detectRootDir(sandboxId));
-    const appDir = await step.run("detect-app-dir", async () => detectAppDir(sandboxId, rootDir));
+    const rootDir = await step.run("detect-root", async () =>
+      detectRootDir(sandboxId)
+    );
+    const appDir = await step.run("detect-app-dir", async () =>
+      detectAppDir(sandboxId, rootDir)
+    );
 
     // 3) agent
     const codeAgent = createAgent<AgentState>({
@@ -52,15 +62,19 @@ export const codeAgentFunction = inngest.createFunction(
               try {
                 const sandbox = await getSandbox(sandboxId);
                 const result = await sandbox.commands.run(command, {
-                  onStdout: (d: string) => (buffers.stdout += d),
-                  onStderr: (d: string) => (buffers.stderr += d),
+                  onStdout: (d: string) => {
+                    buffers.stdout += d;
+                  },
+                  onStderr: (d: string) => {
+                    buffers.stderr += d;
+                  },
                 });
+
                 return result.stdout;
               } catch (error) {
                 console.error(
-                  `Command failed : ${error} \nstdout : ${buffers.stdout} \nstderr : ${buffers.stderr}`
+                  `Command failed: ${error}\nstdout: ${buffers.stdout}\nstderr: ${buffers.stderr}`
                 );
-                return `Command failed : ${error} \nstdout : ${buffers.stdout} \nstderr : ${buffers.stderr}`;
               }
             });
           },
@@ -78,40 +92,52 @@ export const codeAgentFunction = inngest.createFunction(
               })
             ),
           }),
-          handler: async ({ files }, { step, network }:Tool.Options<AgentState>
-
+          handler: async (
+            { files },
+            { step, network }: Tool.Options<AgentState>
           ) => {
-            const newFiles = await step?.run("createOrUpdateFiles", async () => {
-              try {
-                const sb = await getSandbox(sandboxId);
-                const updated: Record<string, { path: string; content: string }> =
-                  (network.state.data.files as any) || {};
+            const newFiles = await step?.run(
+              "createOrUpdateFiles",
+              async () => {
+                try {
+                  const sb = await getSandbox(sandboxId);
+                  const updated: Record<
+                    string,
+                    { path: string; content: string }
+                  > = (network.state.data.files as any) || {};
 
-                for (const f of files) {
-                  // rewrite if project uses src/app
-                  const rel =
-                    f.path.startsWith("app/") && appDir !== "app"
-                      ? f.path.replace(/^app\//, `${appDir}/`)
-                      : f.path;
+                  for (const f of files) {
+                    // rewrite if project uses src/app
+                    const rel =
+                      f.path.startsWith("app/") && appDir !== "app"
+                        ? f.path.replace(/^app\//, `${appDir}/`)
+                        : f.path;
 
-                  const full = `${rootDir}/${rel}`;
-                  const idx = full.lastIndexOf("/");
-                  if (idx > 0) {
-                    const dir = full.slice(0, idx);
-                    await sb.commands.run(`mkdir -p "${dir}"`);
+                    const full = `${rootDir}/${rel}`;
+                    const idx = full.lastIndexOf("/");
+                    if (idx > 0) {
+                      const dir = full.slice(0, idx);
+                      await sb.commands.run(`mkdir -p "${dir}"`);
+                    }
+                    await sb.files.write(full, f.content);
+                    updated[rel] = { path: rel, content: f.content };
                   }
-                  await sb.files.write(full, f.content);
-                  updated[rel] = { path: rel, content: f.content };
-                }
 
-                return updated;
-              } catch (error) {
-                return "Error" + error;
+                  return updated;
+                } catch (error) {
+                  return "Error" + error;
+                }
               }
-            });
+            );
 
             if (typeof newFiles === "object") {
-              network.state.data.files = newFiles;
+              const normalized: { [path: string]: string } = {};
+
+              for (const key in newFiles) {
+                normalized[key] = newFiles[key].content; // extract the string
+              }
+
+              network.state.data.files = normalized;
             }
           },
         }),
@@ -126,10 +152,12 @@ export const codeAgentFunction = inngest.createFunction(
               try {
                 const sb = await getSandbox(sandboxId);
                 const out: Array<{ path: string; content: string }> = [];
+
                 for (const file of files) {
-                  const content = await sb.files.read(file, "utf8");
+                  const content = await sb.files.read(file, { format: "text" });
                   out.push({ path: file, content });
                 }
+
                 return JSON.stringify(out);
               } catch (error) {
                 return "Error" + error;
@@ -142,7 +170,8 @@ export const codeAgentFunction = inngest.createFunction(
         onResponse: async ({ result, network }) => {
           const last = LastAssistantTextMessageContent(result);
           if (last && last.includes("<task_summary>")) {
-            network.state.data.summary = last;
+            if (!network) return result;
+            network.state.data.summary = last as string;
           }
           return result;
         },
@@ -154,13 +183,13 @@ export const codeAgentFunction = inngest.createFunction(
       name: "coding-agent-network",
       agents: [codeAgent],
       maxIter: 15,
-      router: async ({ network }) => (network.state.data.summary ? undefined : codeAgent),
+      router: async ({ network }) =>
+        network.state.data.summary ? undefined : codeAgent,
     });
 
-    const result= await network.run(event.data.value);
-    // const isError = 
+    const result = await network.run(event.data.value);
+    // const isError =
     // !result.state.data.summary||Object.keys(result.state.data.files).length===0;
-
 
     // 5) ensure dev server running FROM THE RIGHT ROOT
     const ensureInfo = await step.run("ensure-dev-server", async () =>
@@ -174,16 +203,11 @@ export const codeAgentFunction = inngest.createFunction(
       return `https://${host}`;
     });
 
-   
-
-
     await step.run("save-result", async () => {
-
       try {
-        
         return await prisma.message.create({
           data: {
-            projectId:event.data.projectId,
+            projectId: event.data.projectId,
             content: result.state.data.summary || "", // summary text
             role: "ASSISTANT",
             type: "RESULT",
@@ -202,8 +226,6 @@ export const codeAgentFunction = inngest.createFunction(
         throw err;
       }
     });
-    
- 
 
     // 7) final
     return {
